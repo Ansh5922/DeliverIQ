@@ -231,11 +231,14 @@ hr { border-color: var(--border) !important; }
 
 
 # ── Load model ────────────────────────────────────────────────────────────────
+import os
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
 @st.cache_resource
 def load_artifacts():
-    with open("best_random_forest_model.pkl", "rb") as f:
+    with open(os.path.join(_DIR, "best_random_forest_model.pkl"), "rb") as f:
         model = pickle.load(f)
-    with open("label_encoder.pkl", "rb") as f:
+    with open(os.path.join(_DIR, "label_encoder.pkl"), "rb") as f:
         le = pickle.load(f)
     return model, le
 
@@ -348,46 +351,71 @@ with right:
 
         # Category
         if mins <= 40:
-            cat, cat_class, cat_icon = "Fast Delivery", "cat-fast", "🚀"
+            cat, cat_icon = "Fast Delivery", "🚀"
+            badge_color = "#34d399"
+            badge_bg    = "rgba(52,211,153,0.15)"
+            badge_border= "rgba(52,211,153,0.3)"
         elif mins <= 70:
-            cat, cat_class, cat_icon = "Average Delivery", "cat-avg", "⏱️"
+            cat, cat_icon = "Average Delivery", "⏱️"
+            badge_color = "#fbbf24"
+            badge_bg    = "rgba(251,191,36,0.15)"
+            badge_border= "rgba(251,191,36,0.3)"
         else:
-            cat, cat_class, cat_icon = "Slow Delivery", "cat-slow", "🐢"
+            cat, cat_icon = "Slow Delivery", "🐢"
+            badge_color = "#f97316"
+            badge_bg    = "rgba(249,115,22,0.15)"
+            badge_border= "rgba(249,115,22,0.3)"
 
         # Confidence proxy: std of individual tree predictions
-        tree_preds  = np.array([t.predict(feat)[0] for t in model.estimators_])
-        std_dev     = tree_preds.std()
-        conf        = max(0, min(100, 100 - (std_dev / prediction) * 100))
+        tree_preds = np.array([t.predict(feat)[0] for t in model.estimators_])
+        std_dev    = tree_preds.std()
+        conf       = max(0, min(100, 100 - (std_dev / prediction) * 100))
 
         # Speed estimate
         speed_kmh = distance / (prediction / 60) if prediction > 0 else 0
 
-        st.markdown(f"""
-        <div class="result-panel">
-            <div class="result-label">Estimated Delivery Time</div>
-            <div class="result-value">{mins}</div>
-            <div class="result-unit">minutes</div>
-            <div class="cat-badge {cat_class}">{cat_icon} &nbsp;{cat}</div>
+        # ── Result Card (pure HTML, no f-string dynamics inside unsafe blocks) ──
+        # Build the full HTML string in Python then pass it once
+        result_html = (
+            '<div class="result-panel">'
+              '<div class="result-label">ESTIMATED DELIVERY TIME</div>'
+              f'<div class="result-value">{mins}</div>'
+              '<div class="result-unit">minutes</div>'
+              f'<div style="display:inline-block;margin-top:1rem;padding:0.3rem 1rem;'
+              f'border-radius:99px;font-size:0.75rem;font-weight:500;letter-spacing:0.08em;'
+              f'background:{badge_bg};color:{badge_color};border:1px solid {badge_border};">'
+              f'{cat_icon}&nbsp;&nbsp;{cat}</div>'
+            '</div>'
+        )
+        st.markdown(result_html, unsafe_allow_html=True)
 
-            <div class="chip-row" style="justify-content:center;">
-                <div class="chip">🌡️ Confidence <span>{conf:.0f}%</span></div>
-                <div class="chip">⚡ Speed <span>{speed_kmh:.1f} km/h</span></div>
-                <div class="chip">📦 Prep <span>{prep_time} min</span></div>
-                <div class="chip">🛣️ Route <span>{distance:.1f} km</span></div>
-            </div>
+        # ── Stat chips using native columns ───────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        ch1, ch2, ch3, ch4 = st.columns(4)
+        chip_css = (
+            "background:#111318;border:1px solid #1e2330;border-radius:8px;"
+            "padding:0.5rem 0.4rem;text-align:center;font-size:0.68rem;color:#5a6070;"
+        )
+        val_css = "color:#e8eaf0;font-weight:600;display:block;font-size:0.8rem;margin-top:2px;"
+        with ch1:
+            st.markdown(f'<div style="{chip_css}">🌡️ Confidence<span style="{val_css}">{conf:.0f}%</span></div>', unsafe_allow_html=True)
+        with ch2:
+            st.markdown(f'<div style="{chip_css}">⚡ Speed<span style="{val_css}">{speed_kmh:.1f} km/h</span></div>', unsafe_allow_html=True)
+        with ch3:
+            st.markdown(f'<div style="{chip_css}">📦 Prep<span style="{val_css}">{prep_time} min</span></div>', unsafe_allow_html=True)
+        with ch4:
+            st.markdown(f'<div style="{chip_css}">🛣️ Route<span style="{val_css}">{distance:.1f} km</span></div>', unsafe_allow_html=True)
 
-            <div style="margin-top:1.5rem;">
-                <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--muted);margin-bottom:0.3rem;">
-                    <span>Model Confidence</span><span>{conf:.0f}%</span>
-                </div>
-                <div class="conf-bar-wrap">
-                    <div class="conf-bar" style="width:{conf:.0f}%"></div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Confidence bar (native progress) ─────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            '<p style="font-size:0.7rem;color:#5a6070;margin-bottom:0.3rem;letter-spacing:0.05em;">'
+            f'MODEL CONFIDENCE &nbsp;·&nbsp; {conf:.0f}%</p>',
+            unsafe_allow_html=True
+        )
+        st.progress(int(conf) / 100)
 
-        # ── Breakdown ─────────────────────────────────────────────────────────
+        # ── Feature Influence ─────────────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<div class="section-label">Feature Influence</div>', unsafe_allow_html=True)
 
@@ -396,28 +424,27 @@ with right:
         max_imp     = importances.max()
 
         for name, imp in zip(feat_names, importances):
-            pct = imp / max_imp * 100
-            bar_color = "#f97316" if pct > 60 else ("#fbbf24" if pct > 30 else "#5a6070")
-            st.markdown(f"""
-            <div style="margin-bottom:0.6rem;">
-                <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-bottom:0.2rem;">
-                    <span>{name}</span><span style="color:var(--text)">{imp*100:.1f}%</span>
-                </div>
-                <div class="conf-bar-wrap">
-                    <div class="conf-bar" style="width:{pct:.0f}%;background:{bar_color}"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            pct = imp / max_imp
+            col_a, col_b = st.columns([3, 1])
+            with col_a:
+                st.progress(float(pct))
+            with col_b:
+                st.markdown(
+                    f'<p style="font-size:0.72rem;color:#e8eaf0;margin:0;padding-top:0.35rem;">'
+                    f'{name} <span style="color:#5a6070">({imp*100:.1f}%)</span></p>',
+                    unsafe_allow_html=True
+                )
 
     else:
-        st.markdown("""
-        <div class="result-panel" style="min-height:340px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.75rem;">
-            <div style="font-size:3rem;opacity:0.4">🛵</div>
-            <div style="font-family:'Syne',sans-serif;font-size:1.1rem;color:var(--muted);text-align:center;">
-                Configure parameters<br>and hit <span style="color:var(--accent)">Predict</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            '<div class="result-panel" style="min-height:340px;display:flex;flex-direction:column;'
+            'align-items:center;justify-content:center;gap:0.75rem;">'
+            '<div style="font-size:3rem;opacity:0.4">🛵</div>'
+            '<div style="font-family:Syne,sans-serif;font-size:1.1rem;color:#5a6070;text-align:center;">'
+            'Configure parameters and hit <span style="color:#f97316">Predict</span>'
+            '</div></div>',
+            unsafe_allow_html=True
+        )
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("<br><br>", unsafe_allow_html=True)
